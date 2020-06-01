@@ -7,7 +7,7 @@ import argparse
 
 
 class VmaHeader():
-    def __init__(self, fo):
+    def __init__(self, fo, skip_hash):
         # 0 -  3:   magic
         #     VMA magic string ("VMA\x00")
         magic = fo.read(4)
@@ -85,7 +85,10 @@ class VmaHeader():
         fo.seek(self.header_size, os.SEEK_SET)
 
         # reread the header and generate a md5 checksum of the data
-        self.__gen_md5sum(fo)
+        if skip_hash:
+            self.generated_md5sum = None
+        else:
+            self.generated_md5sum = self.__gen_md5sum(fo)
 
 
     def __gen_md5sum(self, fo):
@@ -97,9 +100,8 @@ class VmaHeader():
         data = data[:32] + b'\0' * 16 + data[48:]
         h.update(data)
 
-        self.generated_md5sum = h.digest()
-
         fo.seek(p, os.SEEK_SET)
+        return h.digest()
 
 
 class VmaDeviceInfoHeader():
@@ -125,7 +127,7 @@ class VmaDeviceInfoHeader():
 
 
 class VmaExtentHeader():
-    def __init__(self, fo, vma_header):
+    def __init__(self, fo, vma_header, skip_hash):
         self.pos_start = fo.tell()
 
         # 0 -  3:   magic
@@ -156,7 +158,10 @@ class VmaExtentHeader():
 
         self.pos_end = fo.tell()
 
-        self.__gen_md5sum(fo)
+        if skip_hash:
+            self.generated_md5sum = None
+        else:
+            self.generated_md5sum = self.__gen_md5sum(fo)
 
 
     def __gen_md5sum(self, fo):
@@ -168,9 +173,8 @@ class VmaExtentHeader():
         data = data[:24] + b'\0' * 16 + data[40:]
         h.update(data)
 
-        self.generated_md5sum = h.digest()
-
         fo.seek(p, os.SEEK_SET)
+        return h.digest()
 
 
 class Blob():
@@ -236,11 +240,11 @@ def extract(fo, args):
     filesize = fo.tell()
     fo.seek(0, os.SEEK_SET)
 
-    vma_header = VmaHeader(fo)
+    vma_header = VmaHeader(fo, args.skip_hash)
 
     # check the md5 checksum given in the header with the value calculated from
     # the file
-    if not args.skip_hash:
+    if vma_header.generated_md5sum is not None:
         assert vma_header.md5sum == vma_header.generated_md5sum
 
     extract_configs(fo, args, vma_header)
@@ -267,12 +271,12 @@ def extract(fo, args):
     while(fo.tell() < filesize):
         # when there is data to read at this point, we can safely expect a full
         # extent header with additional clusters
-        extent_header = VmaExtentHeader(fo, vma_header)
+        extent_header = VmaExtentHeader(fo, vma_header, args.skip_hash)
         assert vma_header.uuid == extent_header.uuid
 
         # check the md5 checksum given in the header with the value calculated from
         # the file
-        if not args.skip_hash:
+        if extent_header.generated_md5sum is not None:
             assert extent_header.md5sum == extent_header.generated_md5sum
 
         for blockinfo in extent_header.blockinfo:
